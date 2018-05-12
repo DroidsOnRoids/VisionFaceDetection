@@ -14,7 +14,6 @@ final class ViewController: UIViewController {
     var session: AVCaptureSession?
     let shapeLayer = CAShapeLayer()
     
-    let faceDetection = VNDetectFaceRectanglesRequest()
     let faceLandmarks = VNDetectFaceLandmarksRequest()
     let faceLandmarksDetectionRequest = VNSequenceRequestHandler()
     let faceDetectionRequest = VNSequenceRequestHandler()
@@ -63,7 +62,6 @@ final class ViewController: UIViewController {
     func sessionPrepare() {
         session = AVCaptureSession()
         guard let session = session, let captureDevice = frontCamera else { return }
-        
         do {
             let deviceInput = try AVCaptureDeviceInput(device: captureDevice)
             session.beginConfiguration()
@@ -94,97 +92,88 @@ final class ViewController: UIViewController {
 }
 
 extension ViewController: AVCaptureVideoDataOutputSampleBufferDelegate {
-        
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        
         let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
         
         let attachments = CMCopyDictionaryOfAttachments(kCFAllocatorDefault, sampleBuffer, kCMAttachmentMode_ShouldPropagate)
         let ciImage = CIImage(cvImageBuffer: pixelBuffer!, options: attachments as! [String : Any]?)
         
         //leftMirrored for front camera
-        let ciImageWithOrientation = ciImage.applyingOrientation(Int32(UIImageOrientation.leftMirrored.rawValue))
+        let ciImageWithOrientation = ciImage.oriented(forExifOrientation: Int32(UIImageOrientation.leftMirrored.rawValue))
         
-        detectFace(on: ciImageWithOrientation)
+        //detectFace(on: ciImageWithOrientation)
+        let detectFaceRequest = VNDetectFaceLandmarksRequest { (request, error) in
+            if error == nil {
+                if let results = request.results as? [VNFaceObservation] {
+                    print("Found \(results.count) faces")
+                    if results.isEmpty {
+                        DispatchQueue.main.async {
+                            self.shapeLayer.sublayers?.forEach({ (layer) in
+                                layer.removeFromSuperlayer()
+                            })
+                        }
+                    }
+                    else {
+                        for faceObservation in results {
+                            guard let landmarks = faceObservation.landmarks else {
+                                continue
+                            }
+                            DispatchQueue.main.async {
+                                self.shapeLayer.sublayers?.forEach({ (layer) in
+                                    layer.removeFromSuperlayer()
+                                })
+                                if let faceContour = landmarks.faceContour {
+                                    self.draw(points: faceContour.pointsInImage(imageSize: self.view.frame.size))
+                                }
+                                if let medianLine = landmarks.medianLine {
+                                    self.draw(points: medianLine.pointsInImage(imageSize: self.view.frame.size))
+                                }
+                                if let leftEye = landmarks.leftEye {
+                                    self.draw(points: leftEye.pointsInImage(imageSize: self.view.frame.size))
+                                }
+                                if let rightEye = landmarks.rightEye {
+                                    self.draw(points: rightEye.pointsInImage(imageSize: self.view.frame.size))
+                                }
+                                if let innerLips = landmarks.innerLips {
+                                    self.draw(points: innerLips.pointsInImage(imageSize: self.view.frame.size))
+                                }
+                                if let outerLips = landmarks.outerLips {
+                                    self.draw(points: outerLips.pointsInImage(imageSize: self.view.frame.size))
+                                }
+                                if let leftEyebrow = landmarks.leftEyebrow {
+                                    self.draw(points: leftEyebrow.pointsInImage(imageSize: self.view.frame.size))
+                                }
+                                if let rightEyebrow = landmarks.rightEyebrow {
+                                    self.draw(points: rightEyebrow.pointsInImage(imageSize: self.view.frame.size))
+                                }
+                                if let leftPupil = landmarks.leftPupil {
+                                    self.draw(points: leftPupil.pointsInImage(imageSize: self.view.frame.size))
+                                }
+                                if let rightPupil = landmarks.rightPupil {
+                                    self.draw(points: rightPupil.pointsInImage(imageSize: self.view.frame.size))
+                                }
+                                if let nose = landmarks.nose {
+                                    self.draw(points: nose.pointsInImage(imageSize: self.view.frame.size))
+                                }
+                                if let noseCrest = landmarks.noseCrest {
+                                    self.draw(points: noseCrest.pointsInImage(imageSize: self.view.frame.size))
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                print(error!.localizedDescription)
+            }
+        }
+        let cgImage = convertCIImageToCGImage(inputImage: ciImageWithOrientation)
+        let vnImage = VNImageRequestHandler(cgImage: cgImage!, options: [:])
+        try? vnImage.perform([detectFaceRequest])
     }
-        
 }
 
 extension ViewController {
-    
-    func detectFace(on image: CIImage) {
-        try? faceDetectionRequest.perform([faceDetection], on: image)
-        if let results = faceDetection.results as? [VNFaceObservation] {
-            if !results.isEmpty {
-                faceLandmarks.inputFaceObservations = results
-                detectLandmarks(on: image)
-                
-                DispatchQueue.main.async {
-                    self.shapeLayer.sublayers?.removeAll()
-                }
-            }
-        }
-    }
-    
-    func detectLandmarks(on image: CIImage) {
-        try? faceLandmarksDetectionRequest.perform([faceLandmarks], on: image)
-        if let landmarksResults = faceLandmarks.results as? [VNFaceObservation] {
-            for observation in landmarksResults {
-                DispatchQueue.main.async {
-                    if let boundingBox = self.faceLandmarks.inputFaceObservations?.first?.boundingBox {
-                        let faceBoundingBox = boundingBox.scaled(to: self.view.bounds.size)
-                        
-                        //different types of landmarks
-                        let faceContour = observation.landmarks?.faceContour
-                        self.convertPointsForFace(faceContour, faceBoundingBox)
-                        
-                        let leftEye = observation.landmarks?.leftEye
-                        self.convertPointsForFace(leftEye, faceBoundingBox)
-                        
-                        let rightEye = observation.landmarks?.rightEye
-                        self.convertPointsForFace(rightEye, faceBoundingBox)
-                        
-                        let nose = observation.landmarks?.nose
-                        self.convertPointsForFace(nose, faceBoundingBox)
-                        
-                        let lips = observation.landmarks?.innerLips
-                        self.convertPointsForFace(lips, faceBoundingBox)
-                        
-                        let leftEyebrow = observation.landmarks?.leftEyebrow
-                        self.convertPointsForFace(leftEyebrow, faceBoundingBox)
-                        
-                        let rightEyebrow = observation.landmarks?.rightEyebrow
-                        self.convertPointsForFace(rightEyebrow, faceBoundingBox)
-                        
-                        let noseCrest = observation.landmarks?.noseCrest
-                        self.convertPointsForFace(noseCrest, faceBoundingBox)
-                        
-                        let outerLips = observation.landmarks?.outerLips
-                        self.convertPointsForFace(outerLips, faceBoundingBox)
-                    }
-                }
-            }
-        }
-    }
-    
-    func convertPointsForFace(_ landmark: VNFaceLandmarkRegion2D?, _ boundingBox: CGRect) {
-        if let points = landmark?.points, let count = landmark?.pointCount {
-            let convertedPoints = convert(points, with: count)
-            
-            let faceLandmarkPoints = convertedPoints.map { (point: (x: CGFloat, y: CGFloat)) -> (x: CGFloat, y: CGFloat) in
-                let pointX = point.x * boundingBox.width + boundingBox.origin.x
-                let pointY = point.y * boundingBox.height + boundingBox.origin.y
-                
-                return (x: pointX, y: pointY)
-            }
-            
-            DispatchQueue.main.async {
-                self.draw(points: faceLandmarkPoints)
-            }
-        }
-    }
-    
-    func draw(points: [(x: CGFloat, y: CGFloat)]) {
+    func draw(points: [CGPoint]) {
         let newLayer = CAShapeLayer()
         newLayer.strokeColor = UIColor.red.cgColor
         newLayer.lineWidth = 2.0
@@ -198,17 +187,11 @@ extension ViewController {
         }
         path.addLine(to: CGPoint(x: points[0].x, y: points[0].y))
         newLayer.path = path.cgPath
-        
         shapeLayer.addSublayer(newLayer)
     }
-    
-    
-    func convert(_ points: UnsafePointer<vector_float2>, with count: Int) -> [(x: CGFloat, y: CGFloat)] {
-        var convertedPoints = [(x: CGFloat, y: CGFloat)]()
-        for i in 0...count {
-            convertedPoints.append((CGFloat(points[i].x), CGFloat(points[i].y)))
-        }
-        
-        return convertedPoints
-    }
+}
+
+func convertCIImageToCGImage(inputImage: CIImage) -> CGImage! {
+    let context = CIContext(options: nil)
+    return context.createCGImage(inputImage, from: inputImage.extent)
 }
