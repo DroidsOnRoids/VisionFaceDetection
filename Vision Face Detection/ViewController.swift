@@ -103,7 +103,7 @@ extension ViewController: AVCaptureVideoDataOutputSampleBufferDelegate {
         let ciImage = CIImage(cvImageBuffer: pixelBuffer!, options: attachments as! [String : Any]?)
         
         //leftMirrored for front camera
-        let ciImageWithOrientation = ciImage.applyingOrientation(Int32(UIImageOrientation.leftMirrored.rawValue))
+        let ciImageWithOrientation = ciImage.oriented(forExifOrientation: Int32(UIImageOrientation.leftMirrored.rawValue))
         
         detectFace(on: ciImageWithOrientation)
     }
@@ -168,10 +168,8 @@ extension ViewController {
     }
     
     func convertPointsForFace(_ landmark: VNFaceLandmarkRegion2D?, _ boundingBox: CGRect) {
-        if let points = landmark?.points, let count = landmark?.pointCount {
-            let convertedPoints = convert(points, with: count)
-            
-            let faceLandmarkPoints = convertedPoints.map { (point: (x: CGFloat, y: CGFloat)) -> (x: CGFloat, y: CGFloat) in
+        if let points = landmark?.normalizedPoints {
+            let faceLandmarkPoints = points.map { (point: CGPoint) -> (x: CGFloat, y: CGFloat) in
                 let pointX = point.x * boundingBox.width + boundingBox.origin.x
                 let pointY = point.y * boundingBox.height + boundingBox.origin.y
                 
@@ -200,15 +198,5 @@ extension ViewController {
         newLayer.path = path.cgPath
         
         shapeLayer.addSublayer(newLayer)
-    }
-    
-    
-    func convert(_ points: UnsafePointer<vector_float2>, with count: Int) -> [(x: CGFloat, y: CGFloat)] {
-        var convertedPoints = [(x: CGFloat, y: CGFloat)]()
-        for i in 0...count {
-            convertedPoints.append((CGFloat(points[i].x), CGFloat(points[i].y)))
-        }
-        
-        return convertedPoints
     }
 }
